@@ -1,70 +1,120 @@
 import requests
-from openpyxl import Workbook
 import datetime
+import pyodbc
+import schedule
+import time
 
+def job():
+    def create_connection(driver, server, database, user, password, port):
+        connection = None
+        try:
+            connection = pyodbc.connect(
+                f'DRIVER={{{driver}}};'
+                f'SERVER={server},{port};'
+                f'DATABASE={database};'
+                f'UID={user};'
+                f'PWD={password}'
+            )
+            print("Connection to SQL Server successful")
+        except pyodbc.Error as e:
+            print(f"The error '{e}' occurred")
 
-def get_tokens():
-    url = "https://api.userede.com.br/redelabs/oauth/token"
-    body = {
-        "grant_type": "password",
-        "username": "elton.marinho@bagaggio.com.br",
-        "password": ":5@A9hPr9-Po"
-    }
+        return connection
 
-    headers = {
-        "Authorization": "Basic N2I3OWIyNjUtNjFjMi00YmJiLThlNmItZGE2NDNjMDliMThiOjI3bWJXMnpDeFE="
-    }
+    def truncate_table(connection):
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("TRUNCATE TABLE BD_RECEBIVEIS_SEMANAL")
+                connection.commit()
+                print("Tabela foi truncada com sucesso.")
+        except pyodbc.Error as e:
+            print(f"O erro foi: {e}")
 
-    response = requests.post(url, data=body, headers=headers)
+    def insert_data(connection, startdate, enddate, companyNumber, amount, total):
+        cursor = connection.cursor()
+        insert_query = """
+        INSERT INTO BD_RECEBIVEIS_SEMANAL (StartDate, EndDate, CompanyNumber, ValorTotal, Quantidade)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(insert_query, (startdate, enddate, companyNumber, amount, total))
+        connection.commit()
 
-    if response.status_code == 200:
-        data = response.json()
-        access_token = data.get("access_token", "")
-        refresh_token = data.get("refresh_token", "")
-        token_type = data.get("token_type", "")
-        expires_in = data.get("expires_in", "")
-        scope = data.get("scope", "")
+    driver = "ODBC Driver 17 for SQL Server"
+    server = "187.0.198.167"
+    user = "victor.oliveira"
+    password = "@primo01"
+    database = "DADOS_EXCEL"
+    port = 41433
 
-        return access_token, refresh_token, token_type, expires_in, scope
+    connection = create_connection(driver, server, database, user, password, port)
+
+    if connection:
+        print("Código está correto e a conexão foi estabelecida com sucesso.")
     else:
-        print("Falha na obtenção do token. Status code:", response.status_code)
-        return None, None, None, None, None
+        print("Código está correto, mas não foi possível estabelecer a conexão.")
 
+    def get_tokens():
+        url = "https://api.userede.com.br/redelabs/oauth/token"
+        body = {
+            "grant_type": "password",
+            "username": "elton.marinho@bagaggio.com.br",
+            "password": ":5@A9hPr9-Po"
+        }
 
-def refresh_access_token(refresh_token):
-    url = "https://api.userede.com.br/redelabs/oauth/token"
-    body = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token
-    }
+        headers = {
+            "Authorization": "Basic N2I3OWIyNjUtNjFjMi00YmJiLThlNmItZGE2NDNjMDliMThiOjI3bWJXMnpDeFE="
+        }
 
-    headers = {
-        "Authorization": "Basic N2I3OWIyNjUtNjFjMi00YmJiLThlNmItZGE2NDNjMDliMThiOjI3bWJXMnpDeFE="
-    }
+        response = requests.post(url, data=body, headers=headers)
 
-    response = requests.post(url, data=body, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            access_token = data.get("access_token", "")
+            refresh_token = data.get("refresh_token", "")
+            token_type = data.get("token_type", "")
+            expires_in = data.get("expires_in", "")
+            scope = data.get("scope", "")
 
-    if response.status_code == 200:
-        data = response.json()
-        access_token = data.get("access_token", "")
-        refresh_token = data.get("refresh_token", "")
+            return access_token, refresh_token, token_type, expires_in, scope
+        else:
+            print("Falha na obtenção do token. Status code:", response.status_code)
+            return None, None, None, None, None
 
-        return access_token, refresh_token
-    else:
-        print("Falha na atualização do token. Status code:", response.status_code)
-        return None, None
+    def refresh_access_token(refresh_token):
+        url = "https://api.userede.com.br/redelabs/oauth/token"
+        body = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token
+        }
 
+        headers = {
+            "Authorization": "Basic N2I3OWIyNjUtNjFjMi00YmJiLThlNmItZGE2NDNjMDliMThiOjI3bWJXMnpDeFE="
+        }
 
-def main():
-    access_token, refresh_token, _, _, _ = get_tokens()
+        response = requests.post(url, data=body, headers=headers)
 
-    if not access_token or not refresh_token:
-        print("Falha na obtenção do token.")
-        return
+        if response.status_code == 200:
+            data = response.json()
+            access_token = data.get("access_token", "")
+            refresh_token = data.get("refresh_token", "")
 
-    url = "https://api.userede.com.br/redelabs/merchant-statement/v2/receivables/summary"
+            return access_token, refresh_token
+        else:
+            print("Falha na atualização do token. Status code:", response.status_code)
+            return None, None
 
-    companyNumbers = [
+    def main():
+        access_token, refresh_token, _, _, _ = get_tokens()
+
+        if not access_token or not refresh_token:
+            print("Falha na obtenção do token.")
+            return
+
+        truncate_table(connection)
+
+        url = "https://api.userede.com.br/redelabs/merchant-statement/v2/receivables/summary"
+
+        companyNumbers = [
             3016412, 84232633, 84232668, 32143460, 3111628, 73938807, 32144024, 32144261,
             95515208, 75539098, 87805405, 73986313, 95400206, 32144890, 85788600, 32144970,
             32145128, 32145268, 92320384, 32145403, 32145454, 32145497, 32145586, 32145667,
@@ -99,72 +149,69 @@ def main():
             96296941, 96310073, 96313510, 96299754
         ]
 
-    data = datetime.datetime.now()
+        data = datetime.datetime.now()
 
-    data_to_write = []
+        for companyNumber in companyNumbers:
+            for i in range(30):
+                day = data + datetime.timedelta(days=i)
+                if day.weekday() != 5 and day.weekday() != 6:
+                    startdate = f"{day.year:02d}-{day.month:02d}-{day.day:02d}"
+                    enddate = f"{day.year:02d}-{day.month:02d}-{day.day:02d}"
 
-    for companyNumber in companyNumbers:
-        for i in range(30):
-            day = data + datetime.timedelta(days=i)
-            if day.weekday() != 5 and day.weekday() != 6:
-                startdate = f"{day.year:02d}-{day.month:02d}-{day.day:02d}"
-                enddate = f"{day.year:02d}-{day.month:02d}-{day.day:02d}"
+                    params = {
+                        "startDate": startdate,
+                        "endDate": enddate,
+                        "parentCompanyNumber": companyNumber
+                    }
 
-                params = {
-                    "startDate": startdate,
-                    "endDate": enddate,
-                    "parentCompanyNumber": companyNumber
-                }
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + access_token
+                    }
 
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": "Bearer " + access_token
-                }
+                    response = requests.get(url, params=params, headers=headers)
 
-                response = requests.get(url, params=params, headers=headers)
-
-                if response.status_code == 200:
-                    content = response.json().get('content')
-                    if content:
-                        amount = content[0]['amount']
-                        total = content[0]['total']
-                        data_to_write.append((startdate, enddate, companyNumber, amount, total))
-                        print("Valores inseridos para a empresa", companyNumber)
-                    else:
-                        data_to_write.append((startdate, enddate, companyNumber, 0, 0))
-                        print("Inserido vazio para a empresa", companyNumber)
-                elif response.status_code == 401:
-                    new_access_token, new_refresh_token = refresh_access_token(refresh_token)
-                    if new_access_token:
-                        access_token = new_access_token
-                        refresh_token = new_refresh_token
-                        headers["Authorization"] = "Bearer " + access_token
-                        response = requests.get(url, params=params, headers=headers)
-                        if response.status_code == 200:
-                            content = response.json().get('content')
-                            if content:
-                                amount = content[0]['amount']
-                                total = content[0]['total']
-                                data_to_write.append((startdate, enddate, companyNumber, amount, total))
-                                print("Valores inseridos para a empresa", companyNumber)
-                            else:
-                                data_to_write.append((startdate, enddate, companyNumber, 0, 0))
-                                print("Inserido vazio para a empresa", companyNumber)
+                    if response.status_code == 200:
+                        content = response.json().get('content')
+                        if content:
+                            amount = content[0]['amount']
+                            total = content[0]['total']
+                            print(f"Empresa {companyNumber}, Data {startdate}: Amount = {amount}, Total = {total}")
+                            insert_data(connection, startdate, enddate, companyNumber, amount, total)
                         else:
-                            print(f"Erro para a empresa {companyNumber}: {response.status_code}")
+                            print(f"Empresa {companyNumber}, Data {startdate}: Sem dados.")
+                            insert_data(connection, startdate, enddate, companyNumber, 0, 0)
+                    elif response.status_code == 401:
+                        new_access_token, new_refresh_token = refresh_access_token(refresh_token)
+                        if new_access_token:
+                            access_token = new_access_token
+                            refresh_token = new_refresh_token
+                            headers["Authorization"] = "Bearer " + access_token
+                            response = requests.get(url, params=params, headers=headers)
+                            if response.status_code == 200:
+                                content = response.json().get('content')
+                                if content:
+                                    amount = content[0]['amount']
+                                    total = content[0]['total']
+                                    print(
+                                        f"Empresa {companyNumber}, Data {startdate}: Amount = {amount}, Total = {total}")
+                                    insert_data(connection, startdate, enddate, companyNumber, amount, total)
+                                else:
+                                    print(f"Empresa {companyNumber}, Data {startdate}: Sem dados.")
+                                    insert_data(connection, startdate, enddate, companyNumber, 0, 0)
+                            else:
+                                print(f"Erro para a empresa {companyNumber}: {response.status_code}")
+                        else:
+                            print("Falha na atualização do token.")
                     else:
-                        print("Falha na atualização do token.")
-                else:
-                    print(f"Erro para a empresa {companyNumber}: {response.status_code}")
+                        print(f"Erro para a empresa {companyNumber}: {response.status_code}")
 
-    excel_file_path = r"C:\Users\BG-PROVISORIO\Desktop\Teste-Recebiveis.xlsx"
-    workbook = Workbook()
-    sheet = workbook.active
-    for row_data in data_to_write:
-        sheet.append(row_data)
-    workbook.save(excel_file_path)
-    print("Dados escritos no arquivo Excel com sucesso!")
+    schedule.every().day.at("10:29").do(main)
 
+    while True:
+        schedule.run_pending()
+        time.sleep(0.5)
 
 if __name__ == "__main__":
-    main()
+    job()
+
