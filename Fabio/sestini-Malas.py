@@ -1,4 +1,5 @@
 import time
+import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
@@ -16,66 +17,67 @@ start_time = time.time()
 # Contador de requisições
 request_count = 0
 
-# Lista para armazenar títulos de produtos
-product_titles = []
+# Lista para armazenar as informações dos produtos
+products_data = []
 
 # Função para extrair informações de produtos em uma página
 def extract_product_info():
-    products = driver.find_elements(By.CLASS_NAME, 'vtex-product-summary-2-x-container')
+    products = driver.find_elements(By.CLASS_NAME, 'x-shelf__item')
     for product in products:
         try:
             # Extrair o título
-            title_element = product.find_element(By.CLASS_NAME, 'vtex-product-summary-2-x-productBrand')
+            title_element = product.find_element(By.CLASS_NAME, 'x-shelf__title')
             product_title = title_element.text.strip()
 
             # Verificar se o título não está vazio
             if not product_title:
                 continue
 
-            # Adicionar o título à lista
-            product_titles.append(product_title)
-
-            # Extrair a URL da imagem
-            image_element = product.find_element(By.CLASS_NAME, 'vtex-product-summary-2-x-imageContainer')
-            product_image_url = image_element.find_element(By.TAG_NAME, 'img').get_attribute('src')
+            # Extrair a URL da imagem frontal
+            try:
+                product_front_image_url = product.find_element(By.CLASS_NAME, 'x-shelf__img-front').get_attribute('src')
+            except:
+                product_front_image_url = 'Imagem frontal não encontrada'
 
             # Extrair o preço original
             try:
-                original_price_element = product.find_element(By.CLASS_NAME, 'vtex-product-price-1-x-listPriceValue')
+                original_price_element = product.find_element(By.CLASS_NAME, 'x-shelf__best-price')
                 product_original_price = original_price_element.text
             except:
                 product_original_price = 'Preço original não encontrado'
 
-            # Extrair o preço com desconto
+            # Extrair as tags (se existirem)
+            product_tags = []
             try:
-                discount_price_element = product.find_element(By.CLASS_NAME, 'vtex-product-price-1-x-spotPriceValue')
-                product_discount_price = discount_price_element.text
+                if product.find_element(By.CLASS_NAME, 'night-sale'):
+                    product_tags.append('Night Sale')
             except:
-                product_discount_price = 'Preço com desconto não encontrado'
+                pass
+            try:
+                if product.find_element(By.CLASS_NAME, 'sestini-lancamentos'):
+                    product_tags.append('Lançamento')
+            except:
+                pass
 
-            # Extrair as tags
-            tag_elements = product.find_elements(By.CLASS_NAME, 'vtex-product-highlights-2-x-productHighlightText')
-            product_tags = [tag.text for tag in tag_elements]
-
-            # Imprimir as informações do produto
-            print(f'Título: {product_title}')
-            print(f'URL da Imagem: {product_image_url}')
-            print(f'Preço Original: {product_original_price}')
-            print(f'Preço com Desconto: {product_discount_price}')
-            print(f'Tags: {", ".join(product_tags)}')
-            print(f'DIV HTML:\n{product.get_attribute("outerHTML")}\n')
+            # Armazenar as informações do produto
+            products_data.append({
+                'Título': product_title,
+                'URL da Imagem Frontal': product_front_image_url,
+                'Preço Original': product_original_price,
+                'Tags': ', '.join(product_tags) if product_tags else 'Nenhuma tag encontrada'
+            })
 
         except Exception as e:
             print(f'Erro ao extrair informações de um produto: {e}')
 
 # Iterar sobre as páginas
-for page in range(1, 21):
-    url = f'https://www.bagaggio.com.br/malas?order=OrderByReleaseDateDESC&page={page}'
+for page in range(1, 6):
+    url = f'https://www.sestini.com.br/mala?map=c#{page}'
     driver.get(url)
     request_count += 1
 
     # Aguardar carregar a página
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 6)
     wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
 
     # Extrair informações dos produtos
@@ -83,6 +85,12 @@ for page in range(1, 21):
 
 # Fechar o navegador
 driver.quit()
+
+# Criar um DataFrame a partir dos dados dos produtos
+df = pd.DataFrame(products_data)
+
+# Salvar o DataFrame em um arquivo Excel
+df.to_excel('informacoes_produtos.xlsx', index=False)
 
 # Calcular o tempo total
 end_time = time.time()
@@ -93,6 +101,6 @@ print(f'Número total de requisições feitas: {request_count}')
 print(f'Tempo total gasto: {total_time:.2f} segundos')
 
 # Informar quantos produtos diferentes foram encontrados
-unique_product_titles = set(product_titles)
+unique_product_titles = set(df['Título'])
 print(f'Número total de produtos diferentes encontrados: {len(unique_product_titles)}')
 

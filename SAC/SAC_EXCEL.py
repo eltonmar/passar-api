@@ -1,9 +1,14 @@
 import requests
 from requests.auth import HTTPBasicAuth
 import pandas as pd
-import pyodbc
-import schedule
 import time
+import re
+
+def remove_illegal_characters(value):
+    if isinstance(value, str):
+        # Remove caracteres não imprimíveis
+        return re.sub(r'[\x00-\x1F\x7F-\x9F]', '', value)
+    return value
 
 url = "https://bagaggio.zendesk.com/api/v2/tickets.json?page[size]=100"
 headers = {
@@ -13,30 +18,28 @@ email_address = 'wpp.sac@bagaggio.com.br'
 api_token = 'CUn5NJ5enSkBQF0vbUIsNCl9NFUCgy7aYsSJqUFG'
 auth = HTTPBasicAuth(f'{email_address}/token', api_token)
 
-
-def fetch_all_tickets(url, auth, headers):
+def fetch_all_tickets(url, auth, headers, retries=5, backoff_factor=1):
     all_tickets = []
     while url:
-        response = requests.get(url, auth=auth, headers=headers)
-        if response.status_code != 200:
-            print(f"Falha na solicitação: {response.status_code}")
-            print(f"Mensagem de erro: {response.text}")
+        for attempt in range(retries):
+            try:
+                response = requests.get(url, auth=auth, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                all_tickets.extend(data.get('tickets', []))
+                url = data.get('links', {}).get('next')
+                print(f"Próxima página: {url}")
+                break
+            except (requests.exceptions.RequestException, ConnectionResetError) as e:
+                wait_time = backoff_factor * (2 ** attempt)
+                print(f"Erro na conexão: {e}. Tentando novamente em {wait_time} segundos...")
+                time.sleep(wait_time)
+        else:
+            print(f"Falha após {retries} tentativas. Parando a execução.")
             break
-        data = response.json()
-        all_tickets.extend(data.get('tickets', []))
-        url = data.get('links', {}).get('next')
-        print(f"Próxima página: {url}")
     return all_tickets
 
-
-# IDs dos campos padrão que você mencionou
-standard_field_ids = {
-    '22333195': 'Assunto',
-    '22333205': 'Descrição',
-    '22333245': 'Grupo',
-    '22333255': 'Atribuido para',
-    '9647033755156': 'Status'
-}
+tickets_data = fetch_all_tickets(url, auth, headers)
 
 custom_field_ids = [
     '20481751634964',  # Área retorno
@@ -81,23 +84,28 @@ custom_field_ids = [
     '25966692319380',  # Número da OS
     '27265194513556',  # Cliente Reincidente?
     '25427606175380'  # Número da NFD
+        'ticket_id' #'Ticket ID'
 ]
-
-tickets_data = fetch_all_tickets(url, auth, headers)
-
 filtered_data = []
 
+# Filtrar os custom fields dos tickets e adicionar o ticket_id
 for ticket in tickets_data:
-    filtered_fields = {field['id']: field['value'] for field in ticket['custom_fields'] if
-                       str(field['id']) in custom_field_ids}
-
-    # Adiciona os campos padrão ao dicionário
-    for field_id, field_name in standard_field_ids.items():
-        filtered_fields[field_name] = ticket.get('fields', {}).get(field_id)
-
+    filtered_fields = {'ticket_id': ticket['id']}  # Inicializa com o ticket_id
+    custom_fields = {field['id']: remove_illegal_characters(field['value'])
+                     for field in ticket['custom_fields']
+                     if str(field['id']) in custom_field_ids}
+    filtered_fields.update(custom_fields)
     filtered_data.append(filtered_fields)
 
+# Converta os dados filtrados para um DataFrame do pandas
 df = pd.DataFrame(filtered_data)
-'3'
 
-print(df)
+# Escreva os dados no arquivo Excel existente
+with pd.ExcelWriter("C:\\Users\\BG-PROVISORIO\\Desktop\\Talita\\Testando com a Pagination.xlsx", engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+    df.to_excel(writer, index=False, sheet_name='API_Tickets')
+
+print("Dados salvos no arquivo.")
+
+
+
+
